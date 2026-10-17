@@ -1,0 +1,489 @@
+<title>피스톤 시세판</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Do+Hyeon&family=IBM+Plex+Sans+KR:wght@400;600&family=JetBrains+Mono:wght@500;700&display=swap">
+<style>
+/* Layout: trading terminal — simulation column (quote strip, piston chart, crowd) beside a sticky parameter rack; stacks on narrow screens. Single dark look by choice. */
+:root{
+  --bg:#0a0d14; --panel:#111622; --panel2:#0e131d; --line:#1e2533; --fg:#e6e9f0; --muted:#7c8597;
+  --red:#ff3d52; --blue:#3f7dff; --gray:#596273;
+  --display:"Do Hyeon","IBM Plex Sans KR",system-ui,sans-serif;
+  --body:"IBM Plex Sans KR",system-ui,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+  color-scheme:dark;
+}
+body{background:var(--bg);color:var(--fg);font-family:var(--body)}
+.wrap{max-width:1360px;margin:0 auto;padding-block:20px 28px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:18px;align-items:start}
+@media (max-width:900px){.wrap{grid-template-columns:minmax(0,1fr)}}
+.main{display:flex;flex-direction:column;gap:14px;min-width:0}
+header{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:6px 16px}
+h1{font-family:var(--display);font-weight:400;font-size:clamp(28px,5vw,40px);margin:0;letter-spacing:.01em;text-wrap:balance}
+h1 .r{color:var(--red)} h1 .b{color:var(--blue)}
+.sub{color:var(--muted);font-size:13px;margin:0;max-width:60ch}
+.quote{display:grid;grid-template-columns:repeat(auto-fit,minmax(112px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.q{background:var(--panel);padding:10px 12px;display:flex;flex-direction:column;gap:3px;min-width:0}
+.q span{font-size:11px;letter-spacing:.06em;color:var(--muted)}
+.q b{font-family:var(--mono);font-size:17px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.up{color:var(--red)} .dn{color:var(--blue)} .flat{color:var(--fg)}
+canvas{display:block;width:100%;border-radius:6px;background:var(--bg)}
+.ctrl{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+button,select{font:600 13px var(--body);color:var(--fg);background:var(--panel);border:1px solid var(--line);border-radius:5px;padding:9px 14px;cursor:pointer}
+button:hover,select:hover{border-color:var(--muted)}
+button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--fg);outline-offset:2px}
+.good{border-color:color-mix(in srgb,var(--red) 55%,var(--line));color:var(--red)}
+.bad{border-color:color-mix(in srgb,var(--blue) 55%,var(--line));color:var(--blue)}
+.spacer{flex:1}
+.ctrl label{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px}
+.note{font-size:12px;color:var(--muted);margin:0;max-width:72ch;line-height:1.6}
+
+.rack{position:sticky;top:12px;max-height:calc(100vh - 24px);overflow:auto;display:flex;flex-direction:column;gap:10px;padding-right:2px}
+@media (max-width:900px){.rack{position:static;max-height:none}}
+.card{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:12px 12px 14px;display:flex;flex-direction:column;gap:10px}
+.card h2{margin:0;font:400 19px var(--display);letter-spacing:.02em}
+.card h2 small{font:400 11px var(--body);color:var(--muted);margin-left:6px;letter-spacing:0}
+.prm{display:flex;flex-direction:column;gap:4px}
+.prm .lab{display:flex;justify-content:space-between;gap:8px;font-size:12.5px}
+.prm output{font:600 12px var(--mono);font-variant-numeric:tabular-nums;color:var(--fg);white-space:nowrap}
+.prm .hint{font-size:11px;color:var(--muted);line-height:1.45}
+input[type=range]{width:100%;accent-color:var(--muted);margin:0}
+.card.sens input[type=range]{accent-color:#c9a64a}
+.dist{display:flex;height:10px;border-radius:3px;overflow:hidden;background:var(--line)}
+.dist i{display:block;height:100%}
+.chk{display:flex;align-items:center;gap:8px;font-size:12.5px}
+.btnrow{display:flex;gap:8px;flex-wrap:wrap}
+.btnrow button{flex:1;padding:8px 10px}
+</style>
+
+<div class="wrap">
+ <div class="main">
+  <header>
+    <h1>피스톤 시세판 <span class="r">▲</span><span class="b">▼</span></h1>
+    <p class="sub">빨간 매수세가 아래에서 밀어 올리고, 파란 매도세가 위에서 눌러 내립니다. 두 피스톤이 맞닿은 자리가 지금의 주가입니다.</p>
+  </header>
+
+  <div class="quote" aria-live="polite">
+    <div class="q"><span>현재가</span><b id="qPrice">50,000</b></div>
+    <div class="q"><span>등락률</span><b id="qChg">0.00%</b></div>
+    <div class="q"><span>누적 거래량</span><b id="qVol">0</b></div>
+    <div class="q"><span>매수세 (빨강)</span><b id="qR" class="up">0</b></div>
+    <div class="q"><span>매도세 (파랑)</span><b id="qB" class="dn">0</b></div>
+    <div class="q"><span>관망 (회색)</span><b id="qG">0</b></div>
+    <div class="q"><span>체결강도</span><b id="qS">100.0</b></div>
+  </div>
+
+  <canvas id="sim" aria-label="두 피스톤의 힘겨루기로 그려지는 주가 그래프와 거래량, 그 아래 2500명의 투자자"></canvas>
+
+  <div class="ctrl">
+    <button id="bPlay" type="button">일시정지</button>
+    <label for="sSpeed">속도
+      <select id="sSpeed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option></select>
+    </label>
+    <span class="spacer"></span>
+    <button id="bGood" class="good" type="button">호재 뉴스 떨어뜨리기</button>
+    <button id="bBad" class="bad" type="button">악재 뉴스 떨어뜨리기</button>
+    <button id="bReset" type="button">새 장 시작</button>
+  </div>
+  <p class="note">뉴스 물방울이 떨어진 자리의 사람들은 그 색으로 물들고, 이웃이 몇 명 물들었는지에 따라 민감도 문턱을 넘은 사람부터 차례로 따라 물듭니다. 뉴스 지속 시간이 지나면 다시 평소처럼 스스로 판단하고, 잠시 같은 소문에는 무뎌집니다. 한국 시장 관례대로 오름은 빨강, 내림은 파랑이며 상·하한가는 기준가 대비입니다.</p>
+ </div>
+
+ <aside class="rack" aria-label="시뮬레이션 파라미터">
+  <section class="card"><h2>군중 행동</h2><div id="g-crowd" class="prm-list" style="display:flex;flex-direction:column;gap:12px"></div></section>
+  <section class="card"><h2>뉴스 스포이트</h2><div id="g-news" style="display:flex;flex-direction:column;gap:12px"></div>
+    <div class="btnrow"><button id="bGood2" class="good" type="button">호재 떨어뜨리기</button><button id="bBad2" class="bad" type="button">악재 떨어뜨리기</button></div>
+  </section>
+  <section class="card sens"><h2>뉴스 민감도 분포<small>이웃 4명 중 몇 명이 물들어야 따라 바뀌나</small></h2>
+    <div class="dist" id="dist" aria-hidden="true"></div>
+    <div id="g-sens" style="display:flex;flex-direction:column;gap:12px"></div>
+    <label class="chk" for="cSens"><input type="checkbox" id="cSens"> 군중 위에 민감도 지도 보기 (밝을수록 민감)</label>
+  </section>
+  <section class="card"><h2>가격 · 거래량</h2><div id="g-market" style="display:flex;flex-direction:column;gap:12px"></div></section>
+  <button id="bDefault" type="button">모든 값 기본으로</button>
+ </aside>
+</div>
+
+<script>
+(()=>{
+const css=getComputedStyle(document.documentElement);
+const C={bg:css.getPropertyValue('--bg').trim(),line:css.getPropertyValue('--line').trim(),fg:css.getPropertyValue('--fg').trim(),
+  muted:css.getPropertyValue('--muted').trim(),red:css.getPropertyValue('--red').trim(),blue:css.getPropertyValue('--blue').trim(),gray:css.getPropertyValue('--gray').trim()};
+const SENS_COL=['#ffe08a','#e6b94e','#a8813a','#5e4a2a'];
+const MONO='600 11px "JetBrains Mono", ui-monospace, monospace';
+const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
+const $=id=>document.getElementById(id);
+
+/* ---------- 파라미터 ---------- */
+const f2=v=>v.toFixed(2),f0=v=>v.toFixed(0);
+const SPEC=[
+ ['crowd','herd','이웃 따라하기',0,1.5,0.05,0.45,f2,'주변 4명이 빨강·파랑 중 어느 쪽이 많은지를 얼마나 따라가는지'],
+ ['crowd','trend','추세 추종',0,400,10,140,f0,'최근에 오르면 사고 내리면 파는 경향'],
+ ['crowd','revert','적정가 회귀',0,6,0.1,2.4,v=>v.toFixed(1),'적정가보다 비싸면 팔고 싸면 사는 경향'],
+ ['crowd','idle','관망 비율',0,60,1,22,v=>v+'%','마음을 바꿀 때 회색(관망)으로 빠질 확률'],
+ ['crowd','flips','틱마다 마음 바꾸는 사람',0,300,5,90,v=>v+'명','10초(1틱)마다 다시 판단하는 사람 수'],
+ ['crowd','noise','시장 분위기 흔들림',0,0.1,0.005,0.03,v=>v.toFixed(3),'군중 전체 기분이 이유 없이 출렁이는 정도'],
+ ['news','newsCount','한 번에 떨어뜨릴 개수',1,20,1,3,v=>v+'개','버튼 한 번에 무작위 위치로 떨어지는 물방울 수'],
+ ['news','dropR','물방울 크기',0,3,1,1,v=>'반경 '+v+'칸','떨어진 자리에서 곧바로 물드는 범위'],
+ ['news','spread','전파 속도',1,30,1,8,v=>v+'단계/초','한 단계마다 문턱을 넘은 이웃이 한 겹씩 물듦'],
+ ['news','newsDur','뉴스 지속 시간',2,40,1,12,v=>v+'초','물든 사람이 뉴스 색을 유지하는 시간'],
+ ['news','auto','자동 뉴스',0,20,1,0,v=>v?'분당 '+v+'회':'끔','무작위로 호재·악재 물방울이 저절로 떨어짐'],
+ ['sens','w1','1명만 물들어도 바뀜',0,100,1,35,null,''],
+ ['sens','w2','2명이 물들면 바뀜',0,100,1,35,null,''],
+ ['sens','w3','3명이 물들면 바뀜',0,100,1,20,null,''],
+ ['sens','w4','4명 모두 물들어야 바뀜',0,100,1,10,null,''],
+ ['market','impact','가격 충격',0,0.012,0.0005,0.0035,v=>(v*1000).toFixed(1),'매수·매도 인원 차이가 주가를 움직이는 힘'],
+ ['market','vol','가격 잡음',0,0.005,0.0001,0.0012,v=>(v*1000).toFixed(1),'군중과 무관한 무작위 가격 흔들림'],
+ ['market','qty','1인당 주문 수량',1,100,1,10,v=>v+'주','한 사람이 마음을 바꿔 매매할 때의 수량 (거래량)'],
+ ['market','upLim','상한가',1,30,1,30,v=>'+'+v+'%','기준가 대비 하루 최대 상승폭'],
+ ['market','dnLim','하한가',1,30,1,30,v=>'−'+v+'%','기준가 대비 하루 최대 하락폭'],
+];
+const PRM={};
+for(const s of SPEC){
+  PRM[s[1]]=s[6];
+  const box=document.createElement('div');box.className='prm';
+  box.innerHTML=`<label class="lab" for="p_${s[1]}"><span>${s[2]}</span><output id="o_${s[1]}"></output></label>
+    <input type="range" id="p_${s[1]}" min="${s[3]}" max="${s[4]}" step="${s[5]}" value="${s[6]}">`+(s[8]?`<div class="hint">${s[8]}</div>`:'');
+  $('g-'+s[0]).appendChild(box);
+  const inp=box.querySelector('input');
+  inp.addEventListener('input',()=>{PRM[s[1]]=+inp.value;showVal(s);if(s[0]==='sens')assignThresholds()});
+}
+function showVal(s){
+  if(s[0]==='sens'){updateDist();return}
+  $('o_'+s[1]).textContent=s[7](PRM[s[1]]);
+}
+function sensWeights(){let w=[PRM.w1,PRM.w2,PRM.w3,PRM.w4];const t=w.reduce((a,b)=>a+b,0);return t?w.map(x=>x/t):[.25,.25,.25,.25]}
+function updateDist(){
+  const w=sensWeights();$('dist').innerHTML=w.map((x,k)=>`<i style="width:${x*100}%;background:${SENS_COL[k]}"></i>`).join('');
+  ['w1','w2','w3','w4'].forEach((k,j)=>{$('o_'+k).textContent=(w[j]*100).toFixed(0)+'%';$('o_'+k).style.color=SENS_COL[j]});
+}
+SPEC.forEach(showVal);
+$('bDefault').onclick=()=>{for(const s of SPEC){PRM[s[1]]=s[6];$('p_'+s[1]).value=s[6];showVal(s)}assignThresholds()};
+
+/* ---------- 캔버스 ---------- */
+const cv=$('sim'),ctx=cv.getContext('2d');
+let W=0,H=0,dpr=1;const L={};const DX=1.6;const sprites=[];
+function layout(){
+  W=cv.clientWidth;dpr=Math.min(window.devicePixelRatio||1,2);
+  const plotH=Math.max(270,Math.min(470,W*0.5));
+  L.top=48;L.bot=L.top+plotH;L.left=8;L.right=W-8;L.cx=L.left+(L.right-L.left)*0.6;
+  L.volH=plotH*0.15;L.cell=Math.min((W-8)/50,10.5);L.gx=(W-50*L.cell)/2;L.gy=L.bot+70;
+  H=Math.round(L.gy+50*L.cell+12);
+  cv.style.height=H+'px';cv.width=Math.round(W*dpr);cv.height=Math.round(H*dpr);
+  ctx.setTransform(dpr,0,0,dpr,0,0);makeSprites();
+}
+function makeSprites(){
+  sprites.length=0;
+  for(const col of [C.blue,C.gray,C.red]){
+    const s=Math.max(4,Math.round(L.cell*dpr)),o=document.createElement('canvas');o.width=o.height=s;
+    const g=o.getContext('2d');g.fillStyle=col;g.globalAlpha=col===C.gray?0.55:1;
+    g.beginPath();g.arc(s/2,s*0.27,s*0.17,0,7);g.fill();
+    g.beginPath();g.ellipse(s/2,s*0.88,s*0.3,s*0.4,0,Math.PI,0);g.fill();
+    sprites.push(o);
+  }
+}
+
+/* ---------- 시장 모델 ---------- */
+const N=50,P=N*N;
+const st=new Int8Array(P),pulse=new Float32Array(P);
+const info=new Int8Array(P),infoT=new Float32Array(P),imm=new Float32Array(P),thr=new Uint8Array(P);
+const NB=[];for(let i=0;i<P;i++){const r=(i/N)|0,c=i%N,a=[];if(r>0)a.push(i-N);if(r<N-1)a.push(i+N);if(c>0)a.push(i-1);if(c<N-1)a.push(i+1);NB.push(a)}
+let prices,vols,price,openP,fair,mood,mom,tick,R,B,G,imb,cumVol,limit,newsSw=0;
+let sLo=0,sHi=0,vMax=1,banner=null;
+const gauss=()=>{let u=0,v=0;while(!u)u=Math.random();v=Math.random();return Math.sqrt(-2*Math.log(u))*Math.cos(6.2832*v)};
+
+function assignThresholds(){
+  const w=sensWeights();
+  for(let i=0;i<P;i++){let r=Math.random(),k=0;while(k<3&&r>w[k]){r-=w[k];k++}thr[i]=k+1}
+}
+function recount(){R=B=G=0;for(let i=0;i<P;i++){const s=st[i];if(s>0)R++;else if(s<0)B++;else G++}imb=(R-B)/P}
+function step(){
+  mood=mood*0.993+gauss()*PRM.noise;
+  fair*=Math.exp(gauss()*0.0008);
+  let sw=0;const k=PRM.flips|0;
+  for(let j=0;j<k;j++){
+    const i=(Math.random()*P)|0;if(info[i])continue;
+    const r=(i/N)|0,c=i%N;
+    const s4=st[((r+N-1)%N)*N+c]+st[((r+1)%N)*N+c]+st[r*N+(c+N-1)%N]+st[r*N+(c+1)%N];
+    const u=PRM.herd*s4+mom*PRM.trend+mood-PRM.revert*Math.log(price/fair);
+    const ns=Math.random()<PRM.idle/100?0:(Math.random()<(1+Math.tanh(u))/2?1:-1);
+    if(ns!==st[i]){if(ns)sw++;st[i]=ns}
+  }
+  recount();
+  const upP=openP*(1+PRM.upLim/100),dnP=openP*(1-PRM.dnLim/100);
+  let np=price*Math.exp(imb*PRM.impact+gauss()*PRM.vol),lim=0;
+  if(np>=upP){np=upP;lim=1}else if(np<=dnP){np=dnP;lim=-1}
+  if(lim&&lim!==limit)banner={text:lim>0?'상한가 도달':'하한가 도달',col:lim>0?C.red:C.blue,life:1.6};
+  limit=lim;
+  const ret=Math.log(np/price);price=np;mom=mom*0.93+ret*0.07;
+  const v=(sw+newsSw)*PRM.qty*(0.7+Math.random()*0.6);newsSw=0;cumVol+=v;
+  prices.push(price);vols.push(v);if(prices.length>2400){prices.shift();vols.shift()}
+  tick++;
+}
+function reset(){
+  for(let i=0;i<P;i++){st[i]=[1,-1,0][(Math.random()*3)|0];info[i]=0;infoT[i]=0;imm[i]=0;pulse[i]=0}
+  assignThresholds();
+  price=fair=openP=50000;mood=0;mom=0;tick=0;limit=0;cumVol=0;prices=[price,price];vols=[0,0];
+  for(let k=0;k<420;k++)step();
+  sLo=sHi=0;vMax=1;particles.length=0;sparks.length=0;drops.length=0;rings.length=0;banner=null;
+}
+
+/* ---------- 뉴스: 스포이트 & 전파 ---------- */
+const drops=[],rings=[];let newsAcc=0;
+function dropNews(side,count){
+  for(let k=0;k<count;k++)drops.push({side,i:(Math.random()*P)|0,t:-k*0.12-Math.random()*0.08,hit:false});
+  banner={text:(side>0?'호재':'악재')+' 뉴스 × '+count,col:side>0?C.red:C.blue,life:1.4};
+}
+function infect(i,s){info[i]=s;infoT[i]=0;imm[i]=0;if(st[i]!==s){st[i]=s;newsSw++}pulse[i]=1}
+function splash(i,side){
+  const r0=(i/N)|0,c0=i%N,rad=PRM.dropR;
+  for(let dr=-rad;dr<=rad;dr++)for(let dc=-rad;dc<=rad;dc++){
+    if(Math.abs(dr)+Math.abs(dc)>rad)continue;const r=r0+dr,c=c0+dc;if(r<0||r>=N||c<0||c>=N)continue;infect(r*N+c,side)}
+  const[x,y]=personXY(i);rings.push({x,y,life:1,side});
+}
+const newInf=new Int8Array(P);
+function spreadStep(){
+  let any=false;
+  for(let i=0;i<P;i++){
+    newInf[i]=0;if(info[i]||imm[i]>0)continue;
+    const nb=NB[i];let pos=0,neg=0;for(const j of nb){if(info[j]>0)pos++;else if(info[j]<0)neg++}
+    if(!pos&&!neg)continue;const need=Math.min(thr[i],nb.length);
+    if(pos>=need&&pos>=neg){newInf[i]=1;any=true}else if(neg>=need){newInf[i]=-1;any=true}
+  }
+  if(any)for(let i=0;i<P;i++)if(newInf[i])infect(i,newInf[i]);
+}
+
+/* ---------- 에너지 입자 ---------- */
+const particles=[],sparks=[];let emitR=0,emitB=0,hitR=0,hitB=0,ledPh=0;
+function pickIdx(want){for(let t=0;t<14;t++){const i=(Math.random()*P)|0;if(st[i]===want)return i}return -1}
+function personXY(i){return[L.gx+((i%N)+0.5)*L.cell,L.gy+(((i/N)|0)+0.5)*L.cell]}
+function spawn(side){
+  const i=pickIdx(side);if(i<0)return;pulse[i]=Math.max(pulse[i],0.8);
+  const[x,y]=personXY(i);const p={side,t:0,sp:0.7+Math.random()*0.5,x0:x,y0:y};
+  if(side>0){p.x1=x;p.y1=L.gy-30;p.x2=L.cx+(Math.random()-0.5)*30;p.y2=L.bot+70;p.x3=L.cx+(Math.random()-0.5)*10;p.y3=L.bot-4}
+  else{const xr=L.cx+50+Math.random()*Math.max(20,L.right-L.cx-70);p.x1=xr;p.y1=L.gy-20;p.x2=xr;p.y2=L.top-40;p.x3=L.cx+(Math.random()-0.5)*10;p.y3=L.top+4}
+  particles.push(p);
+}
+function bez(a,b,c,d,t){const m=1-t;return m*m*m*a+3*m*m*t*b+3*m*t*t*c+t*t*t*d}
+
+/* ---------- 루프 ---------- */
+let running=true,speed=1,acc=0,frac=0,last=performance.now(),lastQ=0;
+function frame(now){
+  const dt=Math.min(0.05,(now-last)/1000);last=now;
+  if(running){
+    const sdt=dt*speed;
+    acc+=sdt*30;while(acc>=1){step();acc-=1}frac=acc;
+    newsAcc+=sdt*PRM.spread;let guard=0;while(newsAcc>=1&&guard++<8){spreadStep();newsAcc-=1}if(newsAcc>1)newsAcc=1;
+    for(let i=0;i<P;i++){
+      if(info[i]){infoT[i]+=sdt;if(infoT[i]>PRM.newsDur){info[i]=0;imm[i]=PRM.newsDur*0.8}}
+      else if(imm[i]>0)imm[i]-=sdt;
+    }
+    if(PRM.auto>0&&Math.random()<PRM.auto/60*sdt)dropNews(Math.random()<.5?1:-1,1);
+    for(let i=drops.length-1;i>=0;i--){const d=drops[i];d.t+=dt*Math.max(1,Math.sqrt(speed));
+      if(d.t>=0.7&&!d.hit){d.hit=true;splash(d.i,d.side)}if(d.t>=0.95)drops.splice(i,1)}
+    const k=(reduce?4:16)*speed*dt*3;emitR+=R/P*k;emitB+=B/P*k;
+    while(emitR>=1){spawn(1);emitR--}while(emitB>=1){spawn(-1);emitB--}
+    if(Math.random()<Math.abs(imb)*dt*40*(reduce?0.2:1))for(let s=0;s<3;s++)sparks.push({x:0,y:0,vx:(Math.random()<.5?-1:1)*(50+Math.random()*120),vy:(Math.random()-0.5)*70,life:1,col:imb>0?C.red:C.blue,init:true});
+    ledPh+=dt*(1.2+speed*0.6);
+  }
+  for(let i=particles.length-1;i>=0;i--){const p=particles[i];if(running)p.t+=dt*p.sp*Math.sqrt(speed);if(p.t>=1){particles.splice(i,1);if(p.side>0)hitR=Math.min(1,hitR+0.08);else hitB=Math.min(1,hitB+0.08)}}
+  hitR*=0.94;hitB*=0.94;
+  for(let i=0;i<P;i++)if(pulse[i]>0)pulse[i]=Math.max(0,pulse[i]-dt*2.5);
+  draw(dt);
+  if(now-lastQ>120){quote();lastQ=now}
+  requestAnimationFrame(frame);
+}
+
+/* ---------- 그리기 ---------- */
+const fmt=v=>Math.round(v).toLocaleString('ko-KR');
+const fmtVol=v=>v>=1e8?(v/1e8).toFixed(2)+'억':v>=1e4?(v/1e4).toFixed(1)+'만':fmt(v);
+function niceStep(range){const raw=range/5,m=Math.pow(10,Math.floor(Math.log10(raw))),n=raw/m;return(n<1.5?1:n<3.5?2:n<7.5?5:10)*m}
+function clock(T){const sec=9*3600+T*10,h=Math.floor(sec/3600)%24,m=Math.floor(sec/60)%60;return String(h).padStart(2,'0')+':'+String(m).padStart(2,'0')}
+function rrect(x,y,w,h,r){ctx.beginPath();ctx.roundRect?ctx.roundRect(x,y,w,h,r):ctx.rect(x,y,w,h)}
+function hexA(hex,a){const n=parseInt(hex.slice(1),16);return`rgba(${n>>16},${(n>>8)&255},${n&255},${a})`}
+
+function draw(dt){
+  ctx.fillStyle=C.bg;ctx.fillRect(0,0,W,H);
+  const n=prices.length,pLive=prices[n-2]+(prices[n-1]-prices[n-2])*frac;
+  const vis=Math.min(n-1,Math.ceil((L.cx-L.left)/DX)+2);
+  let lo=Infinity,hi=-Infinity,vm=1;for(let i=n-1-vis;i<n;i++){const v=prices[i];if(v<lo)lo=v;if(v>hi)hi=v;if(vols[i]>vm)vm=vols[i]}
+  const rng=Math.max(hi-lo,pLive*0.03),mid=(hi+lo)/2;lo=mid-rng*0.75;hi=mid+rng*0.75;
+  if(!sLo){sLo=lo;sHi=hi}else{sLo+=(lo-sLo)*0.06;sHi+=(hi-sHi)*0.06}
+  vMax+=(vm-vMax)*0.05;
+  const pt=L.top+34,pb=L.bot-L.volH-18,vb=L.bot-2;
+  const yOf=v=>pb-(v-sLo)/(sHi-sLo)*(pb-pt);
+  const xOf=T=>L.cx-(tick-1-T+frac)*DX;
+
+  ctx.fillStyle='rgba(255,255,255,0.018)';ctx.fillRect(L.left,L.top,L.right-L.left,L.bot-L.top);
+  ctx.fillStyle='rgba(255,255,255,0.02)';ctx.fillRect(L.cx,L.top,L.right-L.cx,L.bot-L.top);
+  // 가격 눈금
+  const stp=niceStep(sHi-sLo);ctx.font=MONO;ctx.textAlign='right';ctx.textBaseline='bottom';
+  for(let v=Math.ceil(sLo/stp)*stp;v<=sHi;v+=stp){const y=Math.round(yOf(v))+0.5;if(y<L.top+4||y>pb+20)continue;
+    ctx.strokeStyle=C.line;ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(L.left,y);ctx.lineTo(L.right,y);ctx.stroke();
+    ctx.fillStyle=C.muted;ctx.fillText(fmt(v),L.right-4,y-3)}
+  // 거래량 구역
+  const vTop=vb-L.volH;
+  ctx.strokeStyle=C.line;ctx.beginPath();ctx.moveTo(L.left,vTop-6.5);ctx.lineTo(L.right,vTop-6.5);ctx.stroke();
+  ctx.fillStyle=C.muted;ctx.textAlign='left';ctx.textBaseline='top';ctx.fillText('거래량',L.left+4,vTop-2);
+  ctx.textAlign='right';ctx.fillText(fmtVol(vMax)+'주',L.right-4,vTop-2);
+  for(let i=n-1-vis;i<=n-2;i++){const x=L.cx-(n-2-i+frac)*DX;if(x<L.left)continue;
+    const h=Math.min(L.volH,vols[i]/vMax*L.volH);const up=prices[i]>=prices[i-1];
+    ctx.fillStyle=up?hexA(C.red,0.55):hexA(C.blue,0.55);ctx.fillRect(x-DX/2,vb-h,Math.max(1,DX-0.3),h)}
+  // 시간 눈금
+  ctx.textAlign='center';ctx.textBaseline='top';
+  for(let T=tick-vis-30;T<=tick;T++){if(T%30)continue;const x=xOf(T);if(x<L.left+18||x>L.cx-10)continue;
+    ctx.strokeStyle='rgba(255,255,255,0.04)';ctx.beginPath();ctx.moveTo(x,L.top);ctx.lineTo(x,L.bot);ctx.stroke();
+    ctx.fillStyle=C.muted;ctx.fillText(clock(T),x,L.bot+6)}
+  ctx.fillStyle=C.muted;ctx.textAlign='left';ctx.fillText('장중 '+clock(tick),L.cx+8,L.bot+6);
+  // 기준가 · 상하한가
+  const refLine=(v,col,txt,dash)=>{const y=yOf(v);if(y<L.top+2||y>pb+10)return;ctx.setLineDash(dash);ctx.strokeStyle=col;ctx.beginPath();ctx.moveTo(L.left,y);ctx.lineTo(L.right,y);ctx.stroke();ctx.setLineDash([]);
+    ctx.fillStyle=col;ctx.textAlign='left';ctx.textBaseline='bottom';ctx.fillText(txt,L.left+4,y-3)};
+  refLine(openP,'rgba(230,233,240,0.3)','기준가 '+fmt(openP),[3,4]);
+  refLine(openP*(1+PRM.upLim/100),hexA(C.red,0.7),'상한가 '+fmt(openP*(1+PRM.upLim/100)),[6,3]);
+  refLine(openP*(1-PRM.dnLim/100),hexA(C.blue,0.8),'하한가 '+fmt(openP*(1-PRM.dnLim/100)),[6,3]);
+
+  // 주가선
+  ctx.save();ctx.beginPath();ctx.rect(L.left,L.top,L.cx-L.left,vTop-8-L.top);ctx.clip();
+  const pts=[];for(let i=n-1-vis;i<=n-2;i++)pts.push([L.cx-(n-2-i+frac)*DX,yOf(prices[i])]);pts.push([L.cx,yOf(pLive)]);
+  const ga=ctx.createLinearGradient(0,L.top,0,vTop);ga.addColorStop(0,'rgba(230,233,240,0.10)');ga.addColorStop(1,'rgba(230,233,240,0)');
+  ctx.beginPath();ctx.moveTo(pts[0][0],vTop);for(const p of pts)ctx.lineTo(p[0],p[1]);ctx.lineTo(L.cx,vTop);ctx.fillStyle=ga;ctx.fill();
+  ctx.lineWidth=2;ctx.lineJoin='round';
+  for(const[dir,col]of[[1,C.red],[-1,C.blue]]){ctx.beginPath();
+    for(let i=1;i<pts.length;i++){const d=pts[i][1]<pts[i-1][1]?1:-1;if(d===dir){ctx.moveTo(pts[i-1][0],pts[i-1][1]);ctx.lineTo(pts[i][0],pts[i][1])}}
+    ctx.strokeStyle=col;ctx.shadowColor=col;ctx.shadowBlur=8;ctx.stroke()}
+  ctx.restore();ctx.shadowBlur=0;
+
+  // 에너지 입자
+  ctx.globalCompositeOperation='lighter';
+  for(const p of particles){const col=p.side>0?C.red:C.blue;
+    for(let k=0;k<3;k++){const t=Math.max(0,p.t-k*0.025);const x=bez(p.x0,p.x1,p.x2,p.x3,t),y=bez(p.y0,p.y1,p.y2,p.y3,t);
+      ctx.globalAlpha=(0.8-k*0.25)*(p.t<0.08?p.t/0.08:1);ctx.fillStyle=k?col:'#ffffff';ctx.beginPath();ctx.arc(x,y,k?2.4:1.2,0,7);ctx.fill();
+      if(!k){ctx.globalAlpha=0.22;ctx.fillStyle=col;ctx.beginPath();ctx.arc(x,y,4.5,0,7);ctx.fill()}}}
+  ctx.globalAlpha=1;ctx.globalCompositeOperation='source-over';
+
+  // 피스톤
+  const py=yOf(pLive),span=L.right-L.left;
+  const wR=12+R/P*span*0.153,wB=12+B/P*span*0.153,hh=14;
+  drawPiston(-1,py,wB,hh,hitB,B/P);drawPiston(1,py,wR,hh,hitR,R/P);
+  const win=imb>0?C.red:C.blue,gr=16+Math.abs(imb)*90,rg=ctx.createRadialGradient(L.cx,py,0,L.cx,py,gr);
+  rg.addColorStop(0,'rgba(255,255,255,0.9)');rg.addColorStop(0.15,win);rg.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.globalCompositeOperation='lighter';ctx.globalAlpha=0.35+Math.abs(imb)*1.2;ctx.fillStyle=rg;ctx.beginPath();ctx.arc(L.cx,py,gr,0,7);ctx.fill();
+  for(let i=sparks.length-1;i>=0;i--){const s=sparks[i];if(s.init){s.x=L.cx;s.y=py;s.init=false}
+    s.x+=s.vx*dt;s.y+=s.vy*dt;s.vy+=140*dt;s.life-=dt*1.6;if(s.life<=0){sparks.splice(i,1);continue}
+    ctx.globalAlpha=s.life;ctx.fillStyle=s.col;ctx.fillRect(s.x-1.5,s.y-1,3,2)}
+  ctx.globalAlpha=1;ctx.globalCompositeOperation='source-over';
+  // 현재가 태그
+  const up=pLive>=openP,tag=fmt(pLive)+(limit>0?'  상한가':limit<0?'  하한가':'');ctx.font='700 13px "JetBrains Mono", "IBM Plex Sans KR", monospace';
+  const tw=ctx.measureText(tag).width+14,tx=Math.min(L.right-tw-2,L.cx+Math.max(wR,wB)/2+10);
+  rrect(tx,py-11,tw,22,4);ctx.fillStyle=up?C.red:C.blue;ctx.fill();
+  ctx.fillStyle='#fff';ctx.textAlign='left';ctx.textBaseline='middle';ctx.fillText(tag,tx+7,py+1);
+  ctx.font='600 12px "IBM Plex Sans KR", sans-serif';ctx.textAlign='right';
+  ctx.fillStyle=C.blue;ctx.fillText('매도 피스톤 '+B.toLocaleString()+'명',L.cx-26,L.top+13);
+  ctx.fillStyle=C.red;ctx.fillText('매수 피스톤 '+R.toLocaleString()+'명',L.cx-26,L.bot-L.volH-30);
+
+  if(banner){banner.life-=dt*0.6;if(banner.life<=0)banner=null;else{
+    ctx.globalAlpha=Math.min(1,banner.life*2);ctx.font='400 '+Math.round(Math.min(40,W*0.06))+'px "Do Hyeon", sans-serif';
+    ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillStyle=banner.col;ctx.fillText(banner.text,(L.left+L.cx)/2,L.top+(L.bot-L.top)*0.28);ctx.globalAlpha=1}}
+
+  drawCrowd(dt);
+}
+
+function drawPiston(side,py,w,hh,hit,share){
+  const col=side>0?C.red:C.blue,cx=L.cx,hw=15,hH=24;
+  const baseY=side>0?L.bot-hH:L.top;
+  // 실린더 몸체
+  const g=ctx.createLinearGradient(cx-hw,0,cx+hw,0);g.addColorStop(0,'#1a2030');g.addColorStop(0.5,'#3a4357');g.addColorStop(1,'#141926');
+  rrect(cx-hw,baseY,hw*2,hH,4);ctx.fillStyle=g;ctx.fill();
+  // 실린더 LED 점
+  ctx.globalCompositeOperation='lighter';
+  for(let k=0;k<4;k++){const b=0.25+0.75*Math.max(0,Math.sin(ledPh*5-k*1.2));ctx.globalAlpha=b*(0.5+hit*0.5);ctx.fillStyle=col;
+    ctx.beginPath();ctx.arc(cx-9+k*6,baseY+hH/2,1.7,0,7);ctx.fill();ctx.globalAlpha*=0.35;ctx.beginPath();ctx.arc(cx-9+k*6,baseY+hH/2,4,0,7);ctx.fill()}
+  ctx.globalCompositeOperation='source-over';ctx.globalAlpha=1;
+  // 로드 (회색 금속 + LED 띠)
+  const r0=side>0?py+hh:baseY+hH,r1=side>0?baseY:py-hh;
+  if(r1>r0){
+    const rg=ctx.createLinearGradient(cx-5,0,cx+5,0);rg.addColorStop(0,'#3d4554');rg.addColorStop(0.45,'#a9b1c0');rg.addColorStop(1,'#323946');
+    ctx.fillStyle=rg;ctx.fillRect(cx-5,r0,10,r1-r0);
+    ctx.fillStyle=hexA(col,0.18);ctx.fillRect(cx-5,r0,10,r1-r0);
+    ctx.fillStyle='rgba(0,0,0,0.55)';ctx.fillRect(cx-1.6,r0,3.2,r1-r0);
+    ctx.save();ctx.beginPath();ctx.rect(cx-8,r0,16,r1-r0);ctx.clip();
+    ctx.globalCompositeOperation='lighter';
+    const len=r1-r0,segs=Math.ceil(len/6),lvl=0.35+share*1.2+hit*0.6;
+    for(let s=0;s<segs;s++){
+      const d=s*6,y=side>0?r1-d-4:r0+d;   // 실린더 쪽에서 헤드 쪽으로 흐름
+      const wv=Math.max(0,Math.sin(s*0.55-ledPh*7));const b=Math.min(1,(0.18+0.82*wv*wv)*lvl);
+      ctx.globalAlpha=b;ctx.fillStyle=col;ctx.fillRect(cx-1.2,y,2.4,4);
+      ctx.globalAlpha=b*0.3;ctx.fillRect(cx-4.5,y-1,9,6);
+    }
+    ctx.restore();ctx.globalAlpha=1;
+  }
+  // 헤드
+  const hy=side>0?py:py-hh;
+  const hg=ctx.createLinearGradient(0,hy,0,hy+hh);
+  if(side>0){hg.addColorStop(0,'#ff8a96');hg.addColorStop(0.35,col);hg.addColorStop(1,'#8e1222')}
+  else{hg.addColorStop(0,'#16338f');hg.addColorStop(0.65,col);hg.addColorStop(1,'#93b4ff')}
+  ctx.shadowColor=col;ctx.shadowBlur=10+hit*30;
+  rrect(cx-w/2,hy,w,hh,3);ctx.fillStyle=hg;ctx.fill();ctx.shadowBlur=0;
+  ctx.fillStyle='rgba(0,0,0,0.25)';for(let x=cx-w/2+6;x<cx+w/2-3;x+=7)ctx.fillRect(x,hy+4,1.5,hh-8);
+  ctx.fillStyle='rgba(255,255,255,0.85)';ctx.fillRect(cx-w/2+2,side>0?py:py-1.5,w-4,1.5);
+}
+
+function drawCrowd(dt){
+  const cs=L.cell,sens=$('cSens').checked;
+  ctx.font='600 12px "IBM Plex Sans KR", sans-serif';ctx.textAlign='left';ctx.textBaseline='bottom';ctx.fillStyle=C.muted;
+  ctx.fillText('투자자 2,500명 · 50 × 50',L.gx,L.gy-10);
+  let inf=0;for(let i=0;i<P;i++)if(info[i])inf++;
+  if(inf){ctx.textAlign='right';ctx.fillStyle=C.fg;ctx.fillText('뉴스에 물든 사람 '+inf.toLocaleString()+'명',L.gx+50*cs,L.gy-10)}
+  if(sens){for(let i=0;i<P;i++){ctx.fillStyle=SENS_COL[thr[i]-1];ctx.globalAlpha=0.55;ctx.fillRect(L.gx+(i%N)*cs,L.gy+((i/N)|0)*cs,cs,cs)}ctx.globalAlpha=1}
+  ctx.globalCompositeOperation='lighter';
+  for(let i=0;i<P;i++){
+    const x=L.gx+(i%N)*cs,y=L.gy+((i/N)|0)*cs;
+    if(info[i]){const fresh=1-infoT[i]/PRM.newsDur;const col=info[i]>0?C.red:C.blue;
+      ctx.globalAlpha=0.12+0.38*fresh;ctx.fillStyle=col;ctx.fillRect(x+0.5,y+0.5,cs-1,cs-1);
+      if(infoT[i]<0.35){ctx.globalAlpha=(0.35-infoT[i])*1.6;ctx.fillStyle='#ffffff';ctx.fillRect(x+cs*0.2,y+cs*0.2,cs*0.6,cs*0.6)}}
+    const pv=pulse[i];if(pv>0.05&&st[i]){ctx.globalAlpha=pv*0.45;ctx.fillStyle=st[i]>0?C.red:C.blue;ctx.beginPath();ctx.arc(x+cs/2,y+cs/2,cs*0.7,0,7);ctx.fill()}
+  }
+  ctx.globalAlpha=1;ctx.globalCompositeOperation='source-over';
+  for(let i=0;i<P;i++)ctx.drawImage(sprites[st[i]+1],L.gx+(i%N)*cs,L.gy+((i/N)|0)*cs,cs,cs);
+  // 파문
+  for(let i=rings.length-1;i>=0;i--){const r=rings[i];if(running)r.life-=dt*1.3;if(r.life<=0){rings.splice(i,1);continue}
+    ctx.strokeStyle=r.side>0?C.red:C.blue;ctx.globalAlpha=r.life;ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(r.x,r.y,(1-r.life)*cs*(3+PRM.dropR*2.5)+2,0,7);ctx.stroke()}
+  ctx.globalAlpha=1;ctx.lineWidth=1;
+  // 스포이트와 물방울
+  for(const d of drops){if(d.t<0)continue;const[x,y]=personXY(d.i),col=d.side>0?C.red:C.blue;
+    const top=y-46,fade=d.t<0.15?d.t/0.15:d.t>0.8?Math.max(0,(0.95-d.t)/0.15):1;
+    ctx.globalAlpha=fade;
+    ctx.fillStyle='rgba(220,228,240,0.25)';ctx.strokeStyle='rgba(220,228,240,0.7)';
+    rrect(x-2.5,top,5,18,2);ctx.fill();ctx.stroke();
+    const sq=d.t>0.25&&d.t<0.45?0.75:1;
+    ctx.fillStyle=col;ctx.beginPath();ctx.ellipse(x,top-5,5*sq+1,6*(2-sq)*0.6+1,0,0,7);ctx.fill();
+    ctx.fillStyle=hexA(col,0.7);ctx.fillRect(x-1.5,top+8,3,9);
+    if(d.t>=0.3&&d.t<0.7){const k=(d.t-0.3)/0.4,dy=top+20+(y-top-22)*k*k;
+      ctx.globalAlpha=1;ctx.shadowColor=col;ctx.shadowBlur=10;ctx.fillStyle=col;
+      ctx.beginPath();ctx.moveTo(x,dy-6);ctx.quadraticCurveTo(x+4,dy,x,dy+3.5);ctx.quadraticCurveTo(x-4,dy,x,dy-6);ctx.fill();ctx.shadowBlur=0}
+  }
+  ctx.globalAlpha=1;
+}
+
+/* ---------- 시세 표시 ---------- */
+function quote(){
+  const p=prices[prices.length-1],chg=(p/openP-1)*100,cls=chg>0.0001?'up':chg<-0.0001?'dn':'flat';
+  $('qPrice').textContent=fmt(p);$('qPrice').className=cls;
+  $('qChg').textContent=(chg>0?'▲ ':chg<0?'▼ ':'')+Math.abs(chg).toFixed(2)+'%'+(limit>0?' 상':limit<0?' 하':'');$('qChg').className=cls;
+  $('qVol').textContent=fmtVol(cumVol);
+  $('qR').textContent=R.toLocaleString();$('qB').textContent=B.toLocaleString();$('qG').textContent=G.toLocaleString();
+  const s=B?R/B*100:999;$('qS').textContent=s.toFixed(1);$('qS').className=s>=100?'up':'dn';
+}
+
+/* ---------- 조작 ---------- */
+$('bPlay').onclick=()=>{running=!running;$('bPlay').textContent=running?'일시정지':'재생'};
+$('sSpeed').onchange=e=>{speed=+e.target.value};
+for(const id of['bGood','bGood2'])$(id).onclick=()=>dropNews(1,PRM.newsCount|0);
+for(const id of['bBad','bBad2'])$(id).onclick=()=>dropNews(-1,PRM.newsCount|0);
+$('bReset').onclick=()=>{reset();quote()};
+
+new ResizeObserver(()=>{if(cv.clientWidth!==W)layout()}).observe(cv);
+layout();reset();quote();
+requestAnimationFrame(frame);
+})();
+</script>
